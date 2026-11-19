@@ -1,3 +1,4 @@
+import { HttpError } from './http';
 import type { MediaSpec } from './types';
 
 // Analytics: LinkedIn's creator analytics export, parsed in the browser
@@ -43,7 +44,7 @@ export function intOrNull(v: unknown): number | null {
 }
 
 export async function importAnalytics(env: Env, body: AnalyticsImport): Promise<void> {
-  if (!ISO_DATE.test(body.range_start ?? '') || !ISO_DATE.test(body.range_end ?? '')) throw new Error('Export date range not found in the file');
+  if (!ISO_DATE.test(body.range_start ?? '') || !ISO_DATE.test(body.range_end ?? '')) throw new HttpError(400, 'Export date range not found in the file');
   const daily = (body.daily ?? []).filter((d) => ISO_DATE.test(d.date)).slice(0, 400);
   const fdaily = (body.followers_daily ?? []).filter((d) => ISO_DATE.test(d.date)).slice(0, 400);
   const posts = (body.posts ?? []).filter((p) => typeof p.url === 'string' && p.url.startsWith('https://www.linkedin.com/')).slice(0, 100);
@@ -96,7 +97,7 @@ export type PageStats = { [K in (typeof PAGE_STAT_KEYS)[number]]: number | null 
 export type PageStatsBody = { checked_on?: string; items?: (Partial<PageStats> & { id: string; demographics?: DemoRow[] })[] };
 
 export async function savePageStats(env: Env, body: PageStatsBody): Promise<void> {
-  if (!ISO_DATE.test(body.checked_on ?? '')) throw new Error('checked_on must be YYYY-MM-DD');
+  if (!ISO_DATE.test(body.checked_on ?? '')) throw new HttpError(400, 'checked_on must be YYYY-MM-DD');
   const items = (body.items ?? []).filter((it) => /^\d{19}$/.test(String(it.id))).slice(0, 200);
   if (!items.length) return;
   await env.DB.batch(

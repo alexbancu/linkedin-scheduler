@@ -1,7 +1,7 @@
 import { ISO_DATE, buildAnalytics, importAnalytics, savePageStats, type AnalyticsImport, type PageStatsBody } from './analytics';
 import { MAX_COMMENT_CHARS, MAX_POST_CHARS, MAX_THUMB_CHARS, MEDIA_LIMITS, QUEUES, STAGES, isQueue, isStage, qKey, queueSettings, type QueueKey, type Stage } from './config';
 import { encryptToken, getLinkedInToken } from './crypto';
-import { json } from './http';
+import { HttpError, json } from './http';
 import { oauthStateCookie } from './oauth';
 import { handleMediaUpload, handleVideoInfo, publishToLinkedIn } from './linkedin';
 import { getPost, markPosted, moveInQueue, postFirstComment } from './posts';
@@ -233,12 +233,12 @@ export async function handleApi(request: Request, url: URL, env: Env): Promise<R
 
 export function validateMediaSpec(media: MediaSpec | null | undefined): MediaSpec | null {
   if (!media) return null;
-  if (!['images', 'document', 'video'].includes(media.kind)) throw new Error('Invalid media kind');
+  if (!['images', 'document', 'video'].includes(media.kind)) throw new HttpError(400, 'Invalid media kind');
   if (!Array.isArray(media.items) || media.items.length === 0) return null;
   const limit = MEDIA_LIMITS[media.kind];
-  if (media.items.length > limit.maxCount) throw new Error(media.kind + ' allows at most ' + limit.maxCount);
+  if (media.items.length > limit.maxCount) throw new HttpError(400, media.kind + ' allows at most ' + limit.maxCount);
   for (const it of media.items) {
-    if (typeof it.urn !== 'string' || !it.urn.startsWith('urn:li:')) throw new Error('Invalid media URN');
+    if (typeof it.urn !== 'string' || !it.urn.startsWith('urn:li:')) throw new HttpError(400, 'Invalid media URN');
   }
   return {
     kind: media.kind,

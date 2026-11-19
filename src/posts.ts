@@ -1,3 +1,4 @@
+import { HttpError } from './http';
 import { getLinkedInToken } from './crypto';
 import { formatForLinkedIn } from './format';
 import { getPersonUrn, liHeaders } from './linkedin';
@@ -5,7 +6,7 @@ import type { PostRow } from './types';
 
 export async function getPost(env: Env, id: string): Promise<PostRow> {
   const post = await env.DB.prepare('SELECT * FROM posts WHERE id = ?').bind(id).first<PostRow>();
-  if (!post) throw new Error('Post not found');
+  if (!post) throw new HttpError(404, 'Post not found');
   return post;
 }
 export async function markPosted(env: Env, id: string, postUrl: string): Promise<void> {

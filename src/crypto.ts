@@ -1,4 +1,5 @@
 /** AES-256-GCM for the LinkedIn token at rest. Stored form: v1:<iv>:<ciphertext>, base64. */
+import { HttpError } from './http';
 import { getSettings } from './settings';
 
 export function b64encode(bytes: Uint8Array): string {
@@ -30,7 +31,7 @@ export async function encryptToken(env: Env, plaintext: string): Promise<string>
 }
 export async function decryptToken(env: Env, stored: string): Promise<string> {
   const [version, ivB64, ctB64] = stored.split(':');
-  if (version !== 'v1' || !ivB64 || !ctB64) throw new Error('Stored token is in an unknown format. Connect LinkedIn again.');
+  if (version !== 'v1' || !ivB64 || !ctB64) throw new HttpError(409, 'Stored token is in an unknown format. Connect LinkedIn again.');
   const key = await encKey(env);
   const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64decode(ivB64) }, key, b64decode(ctB64));
   return new TextDecoder().decode(pt);

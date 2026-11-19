@@ -242,7 +242,7 @@
       v.onloadeddata = function () { try { v.currentTime = Math.min(0.1, (v.duration || 1) / 2); } catch (e) { grab(); } };
       v.onseeked = grab;
       v.onerror = function () { done(null); };
-      v.src = url;
+      if (url.indexOf('blob:') === 0) v.src = url; else done(null);
     });
   }
   // single image/video renders large in the preview -> 720px; grid tiles stay small -> 480px
@@ -362,7 +362,8 @@
           return;
         }
         var local = LOCAL_VIDEO[it.urn];
-        if (local && !v.src) v.src = local;
+        // only object URLs this tab created for the user's own file
+        if (local && !v.src && local.indexOf('blob:') === 0) v.src = local;
         if (d.status === 'PROCESSING' || d.status === 'WAITING_UPLOAD') {
           note.textContent = 'LinkedIn is still processing this video' +
             (local ? ' (playing your local file; the cover switches to LinkedIn’s when ready)' : ' (this preview updates by itself)');

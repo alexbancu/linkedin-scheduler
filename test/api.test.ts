@@ -79,7 +79,7 @@ describe('HTTP surface', () => {
   it('serves the dashboard script from its own file', async () => {
     const html = await (await req('/')).text();
     expect(html).toContain('<script src="/app.js"></script>');
-    expect(html).not.toMatch(/<script>|onclick=/);
+    expect(html).not.toMatch(/<script\s*>|onclick=/i);
     const js = await req('/app.js');
     expect(js.headers.get('Content-Type')).toContain('javascript');
   });

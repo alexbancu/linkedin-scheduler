@@ -61,9 +61,9 @@ async function route(request: Request, env: Env): Promise<Response> {
     } catch (e) {
       if (e instanceof SyntaxError) return json({ error: 'Request body is not valid JSON' }, 400);
       if (e instanceof HttpError) return json({ error: e.message }, e.status);
+      // anything unexpected stays in the logs; the response says only that it failed
       console.error(JSON.stringify({ event: 'api_error', path: url.pathname, error: String(e) }));
-      // the caller is the authenticated owner, and the reason (often LinkedIn's answer) is what they need to fix it
-      return json({ error: String(e instanceof Error ? e.message : e).slice(0, 300) }, 500);
+      return json({ error: 'Internal error. The Worker logs have the details.' }, 500);
     }
   }
 

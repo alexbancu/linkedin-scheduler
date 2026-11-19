@@ -1,7 +1,7 @@
 import { LINKEDIN_VERSION, MEDIA_LIMITS } from './config';
 import { getLinkedInToken } from './crypto';
 import { buildContent, escapeCommentary, formatForLinkedIn } from './format';
-import { json } from './http';
+import { HttpError, json } from './http';
 import { getSettings, setSetting } from './settings';
 import type { MediaSpec, PostRow } from './types';
 
@@ -18,7 +18,7 @@ export async function getPersonUrn(env: Env, token: string): Promise<string> {
   const settings = await getSettings(env);
   if (settings.li_person_urn) return settings.li_person_urn;
   const response = await fetch('https://api.linkedin.com/v2/userinfo', { headers: { Authorization: 'Bearer ' + token } });
-  if (!response.ok) throw new Error('LinkedIn userinfo failed (' + response.status + '): ' + (await response.text()).slice(0, 300));
+  if (!response.ok) throw new HttpError(502, 'LinkedIn userinfo failed (' + response.status + '): ' + (await response.text()).slice(0, 300));
   const body = await response.json<{ sub: string }>();
   const urn = 'urn:li:person:' + body.sub;
   await setSetting(env, 'li_person_urn', urn);
@@ -114,10 +114,10 @@ export function linkedInUploadUrl(u: string): string {
   try {
     parsed = new URL(u);
   } catch {
-    throw new Error('LinkedIn returned an invalid upload URL');
+    throw new HttpError(502, 'LinkedIn returned an invalid upload URL');
   }
   if (parsed.protocol !== 'https:' || !(parsed.hostname === 'linkedin.com' || parsed.hostname.endsWith('.linkedin.com'))) {
-    throw new Error('Refusing to send the token to an upload host outside linkedin.com: ' + parsed.hostname);
+    throw new HttpError(502, 'Refusing to send the token to an upload host outside linkedin.com: ' + parsed.hostname);
   }
   return u;
 }
@@ -137,7 +137,7 @@ export async function liUploadSinglePart(
     headers: liHeaders(token),
     body: JSON.stringify({ initializeUploadRequest: { owner } }),
   });
-  if (!init.ok) throw new Error(kind + ' init failed (' + init.status + '): ' + (await init.text()).slice(0, 300));
+  if (!init.ok) throw new HttpError(502, kind + ' init failed (' + init.status + '): ' + (await init.text()).slice(0, 300));
   const j = await init.json<{ value: { uploadUrl: string; image?: string; document?: string } }>();
   const uploadUrl = j.value.uploadUrl;
   const urn = (kind === 'images' ? j.value.image : j.value.document) as string;
@@ -148,7 +148,7 @@ export async function liUploadSinglePart(
     body,
     duplex: 'half',
   } as RequestInit & { duplex: 'half' });
-  if (put.status !== 200 && put.status !== 201) throw new Error(kind + ' upload failed (' + put.status + '): ' + (await put.text()).slice(0, 300));
+  if (put.status !== 200 && put.status !== 201) throw new HttpError(502, kind + ' upload failed (' + put.status + '): ' + (await put.text()).slice(0, 300));
   return urn;
 }
 
@@ -185,7 +185,7 @@ export async function liUploadVideo(token: string, owner: string, body: Readable
     headers: liHeaders(token),
     body: JSON.stringify({ initializeUploadRequest: { owner, fileSizeBytes, uploadCaptions: false, uploadThumbnail: false } }),
   });
-  if (!init.ok) throw new Error('video init failed (' + init.status + '): ' + (await init.text()).slice(0, 300));
+  if (!init.ok) throw new HttpError(502, 'video init failed (' + init.status + '): ' + (await init.text()).slice(0, 300));
   const j = await init.json<{
     value: { video: string; uploadToken: string; uploadInstructions: { uploadUrl: string; firstByte: number; lastByte: number }[] };
   }>();
@@ -201,7 +201,7 @@ export async function liUploadVideo(token: string, owner: string, body: Readable
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/octet-stream', 'Content-Length': String(chunk.length) },
       body: chunk,
     });
-    if (put.status !== 200 && put.status !== 201) throw new Error('video part upload failed (' + put.status + ')');
+    if (put.status !== 200 && put.status !== 201) throw new HttpError(502, 'video part upload failed (' + put.status + ')');
     etags.push((put.headers.get('etag') ?? '').replace(/^"|"$/g, ''));
   }
 
@@ -210,17 +210,17 @@ export async function liUploadVideo(token: string, owner: string, body: Readable
     headers: liHeaders(token),
     body: JSON.stringify({ finalizeUploadRequest: { video, uploadToken, uploadedPartIds: etags } }),
   });
-  if (!fin.ok) throw new Error('video finalize failed (' + fin.status + '): ' + (await fin.text()).slice(0, 300));
+  if (!fin.ok) throw new HttpError(502, 'video finalize failed (' + fin.status + '): ' + (await fin.text()).slice(0, 300));
   return video;
 }
 
 export async function publishToLinkedIn(env: Env, post: PostRow, force: boolean): Promise<string> {
   const text = formatForLinkedIn(post.text);
   if (!force && /\[[^\]]*\]/.test(text)) {
-    throw new Error('Post contains unfilled [placeholders] — fix the text or use force publish.');
+    throw new HttpError(502, 'Post contains unfilled [placeholders] — fix the text or use force publish.');
   }
   const token = await getLinkedInToken(env);
-  if (!token) throw new Error('No LinkedIn token saved. Add one in Settings.');
+  if (!token) throw new HttpError(502, 'No LinkedIn token saved. Add one in Settings.');
 
   const settings = await getSettings(env);
   const savedAt = settings.li_token_saved_at ? Number(settings.li_token_saved_at) : 0;
@@ -244,7 +244,7 @@ export async function publishToLinkedIn(env: Env, post: PostRow, force: boolean)
   if (response.status !== 201) {
     const detail = (await response.text()).slice(0, 500);
     const hint = ageDays !== null && ageDays > 45 ? ' (token is ' + ageDays + ' days old — it may have expired)' : '';
-    throw new Error('LinkedIn post failed (' + response.status + ')' + hint + ': ' + detail);
+    throw new HttpError(502, 'LinkedIn post failed (' + response.status + ')' + hint + ': ' + detail);
   }
   return 'https://www.linkedin.com/feed/update/' + response.headers.get('x-restli-id');
 }
