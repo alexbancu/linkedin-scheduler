@@ -1,0 +1,6 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+DASH_PASSWORD=change-me
+# openssl rand -base64 32
+TOKEN_ENC_KEY=
+# Only needed for the built-in "Connect LinkedIn" OAuth flow
+LI_CLIENT_SECRET=

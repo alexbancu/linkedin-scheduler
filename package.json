@@ -1,0 +1,22 @@
+{
+  "name": "linkedin-scheduler",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Schedule and auto-publish LinkedIn posts on weekly slots. Cloudflare Workers, D1 and the official LinkedIn API.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "types": "wrangler types",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.5.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12",
+    "wrangler": "4.107.1"
+  }
+}
