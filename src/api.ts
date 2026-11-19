@@ -56,7 +56,8 @@ export async function handleApi(request: Request, url: URL, env: Env): Promise<R
       try {
         postUrl = await publishToLinkedIn(env, post, body.force === true);
       } catch (e) {
-        const msg = String(e instanceof Error ? e.message : e).slice(0, 500);
+        const msg = e instanceof HttpError ? e.message.slice(0, 500) : 'Publishing failed. The Worker logs have the details.';
+        if (!(e instanceof HttpError)) console.error(JSON.stringify({ event: 'manual_publish_failed', id, error: String(e) }));
         await env.DB.prepare("UPDATE posts SET status = 'failed', last_error = ? WHERE id = ?").bind(msg, id).run();
         return json({ error: msg }, 502);
       }
