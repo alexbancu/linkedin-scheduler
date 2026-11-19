@@ -5,10 +5,10 @@ export const MAX_THUMB_CHARS = 160_000; // ~120KB data URL — client-generated 
 // Each queue owns one weekly slot (category-based scheduling, as in SocialBee or
 // Hypefury). Engineers keeps the original un-prefixed setting keys so the settings
 // saved before the second queue existed carry over unchanged.
-export type QueueKey = 'engineers' | 'devshops';
+export type QueueKey = 'engineers' | 'gtm';
 export const QUEUES: { key: QueueKey; label: string; defaults: { post_day: string; post_hour: string; cadence_weeks: string } }[] = [
   { key: 'engineers', label: 'Engineers', defaults: { post_day: '2', post_hour: '15', cadence_weeks: '1' } },
-  { key: 'devshops', label: 'GTM leaders', defaults: { post_day: '4', post_hour: '15', cadence_weeks: '1' } },
+  { key: 'gtm', label: 'GTM leaders', defaults: { post_day: '4', post_hour: '15', cadence_weeks: '1' } },
 ];
 // Optional funnel stage per post: tofu (reach), mofu (trust), bofu (ask).
 export const STAGES = ['tofu', 'mofu', 'bofu'] as const;
@@ -17,7 +17,7 @@ export function isStage(x: unknown): x is Stage {
   return typeof x === 'string' && (STAGES as readonly string[]).includes(x);
 }
 export function isQueue(q: unknown): q is QueueKey {
-  return q === 'engineers' || q === 'devshops';
+  return q === 'engineers' || q === 'gtm';
 }
 export function qKey(q: QueueKey, name: string): string {
   return q === 'engineers' ? name : q + '.' + name;
@@ -66,12 +66,17 @@ export const DEFAULTS: SettingsMap = {
 };
 
 export const SECURITY_HEADERS: Record<string, string> = {
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'no-referrer',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  // Scripts only from this origin (no inline script). Inline styles stay allowed:
+  // the dashboard sets element styles, and a style cannot run code.
   'Content-Security-Policy':
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
-    // licdn.com: video cover + processed MP4 read back from LinkedIn for the preview
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+    // licdn.com: video cover and processed MP4 read back from LinkedIn for the preview
     "img-src 'self' data: blob: https://*.licdn.com; media-src 'self' blob: https://*.licdn.com; " +
-    "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 };

@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS posts (
   approved_at INTEGER,
   posted_at INTEGER,
   post_url TEXT,
-  queue TEXT NOT NULL DEFAULT 'engineers', -- engineers | devshops
+  queue TEXT NOT NULL DEFAULT 'engineers', -- engineers | gtm
   slot_key TEXT,
   stage TEXT, -- tofu | mofu | bofu | NULL (optional funnel stage)
   last_error TEXT,

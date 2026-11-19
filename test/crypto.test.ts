@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { decryptToken, encryptToken, getLinkedInToken } from '../src/crypto';
-import { getSettings, setSetting } from '../src/settings';
+import { setSetting } from '../src/settings';
 
 describe('LinkedIn token at rest', () => {
   it('round-trips through AES-256-GCM', async () => {
@@ -21,11 +21,13 @@ describe('LinkedIn token at rest', () => {
     await expect(decryptToken(env, [v, iv, flipped].join(':'))).rejects.toThrow();
   });
 
-  it('encrypts a legacy plaintext token the first time it is read', async () => {
-    await setSetting(env, 'li_token', 'old-plaintext');
-    expect(await getLinkedInToken(env)).toBe('old-plaintext');
-    const stored = (await getSettings(env)).li_token;
-    expect(stored.startsWith('v1:')).toBe(true);
-    expect(await getLinkedInToken(env)).toBe('old-plaintext');
+  it('refuses a key that is not 32 bytes', async () => {
+    await expect(encryptToken({ ...env, TOKEN_ENC_KEY: btoa('sixteen-byte-key') }, 'x')).rejects.toThrow(/32 bytes/);
+  });
+
+  it('reads back a saved token, and returns null when none is saved', async () => {
+    expect(await getLinkedInToken(env)).toBeNull();
+    await setSetting(env, 'li_token', await encryptToken(env, 'saved'));
+    expect(await getLinkedInToken(env)).toBe('saved');
   });
 });

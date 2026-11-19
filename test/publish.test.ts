@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { SELF, env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encryptToken } from '../src/crypto';
 import { publishCheck } from '../src/publish';
@@ -84,11 +84,25 @@ describe('publishCheck', () => {
   });
 
   it('respects the account-wide minimum gap between posts', async () => {
-    await env.DB.prepare("INSERT INTO posts (id, text, status, created_at, posted_at, queue) VALUES ('old', 'x', 'posted', 0, ?, 'devshops')")
+    await env.DB.prepare("INSERT INTO posts (id, text, status, created_at, posted_at, queue) VALUES ('old', 'x', 'posted', 0, ?, 'gtm')")
       .bind(IN_SLOT.getTime() - 3 * 3_600_000)
       .run();
     await addApproved('a', 'first');
     await publishCheck(env, IN_SLOT);
     expect(linkedIn).not.toHaveBeenCalled();
+  });
+});
+
+describe('manual publish', () => {
+  it('publishes once when "Post now" is clicked twice at the same moment', async () => {
+    await addApproved('a', 'first');
+    const click = () =>
+      SELF.fetch('https://example.com/api/posts/a/publish', {
+        method: 'POST', headers: { Authorization: 'Bearer test-password', 'Content-Type': 'application/json' }, body: '{}',
+      });
+    const codes = (await Promise.all([click(), click()])).map((r) => r.status).sort();
+    expect(codes).toEqual([200, 409]);
+    expect(linkedIn).toHaveBeenCalledTimes(1);
+    expect((await post('a'))?.status).toBe('posted');
   });
 });

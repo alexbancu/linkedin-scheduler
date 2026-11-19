@@ -32,13 +32,14 @@ flowchart LR
 
 | File | Role |
 | --- | --- |
-| `src/index.ts` | Routes requests and runs the cron |
+| `src/index.ts` | Routes requests, sign-in, and the cron |
+| `src/auth.ts` | Session cookies, password checks, rate limits |
 | `src/publish.ts` | Decides whether to publish now and claims the slot |
 | `src/schedule.ts` | Slot math in Europe/Bucharest. Pure functions, DST aware |
 | `src/linkedin.ts` | LinkedIn API: publish, streamed image and PDF upload, chunked video upload |
 | `src/crypto.ts` | AES-256-GCM encryption of the LinkedIn token |
 | `src/api.ts`, `src/analytics.ts` | JSON API for the dashboard |
-| `src/dashboard.html` | The dashboard, a single file with no build step |
+| `src/dashboard/` | The dashboard: one HTML file and one script, no build step |
 | `migrations/` | D1 schema |
 
 ## Design decisions
@@ -55,11 +56,17 @@ flowchart LR
 
 ## Security
 
-- **Dashboard and API:** one password, kept as a Worker secret. It is compared in constant time with `crypto.subtle.timingSafeEqual`.
-- **LinkedIn token:** encrypted at rest with AES-256-GCM, using a key held in a Worker secret. The API never returns it, only whether it is set and how old it is.
-- **OAuth:** a single-use `state` value that expires after 10 minutes. Scopes are `openid profile w_member_social`.
-- **Headers:** a strict Content Security Policy, plus `X-Frame-Options: DENY`, `nosniff` and `no-referrer` on every response.
-- **No HTML injection:** post text is rendered with `textContent`.
+- **Sign-in:** the dashboard sends the password once to `/api/login` and gets a signed session cookie back (HMAC-SHA256, 7 days, `HttpOnly; Secure; SameSite=Strict`). The browser never stores the password, and page scripts cannot read the cookie. Changing `DASH_PASSWORD` signs every session out.
+- **Scripts:** can send the password as a Bearer token instead. It is compared in constant time with `crypto.subtle.timingSafeEqual`.
+- **Brute force:** password checks are rate limited per IP with the Workers rate limiting binding: 5 logins and 60 Bearer calls a minute. Use a long random password, for example `openssl rand -base64 24`.
+- **CSRF:** besides `SameSite=Strict`, every write made with the cookie must come with an `Origin` header from the app's own origin.
+- **LinkedIn token:** encrypted at rest with AES-256-GCM (a 32-byte key in a Worker secret, checked at startup). The API never returns it, only whether it is set and how old it is.
+- **OAuth:** the `state` value is random, single use and valid for 10 minutes. It must match both the copy in D1 and a cookie in the browser that started the sign-in, so a forged callback is ignored and cannot cancel a real one. Text from the callback's query string is never shown on the page.
+- **Outbound requests:** the access token is only sent to `https` hosts under `linkedin.com`, also when LinkedIn hands back an upload URL. Media URLs passed to the page must be on `licdn.com`.
+- **Publishing:** both the scheduler and "Post now" claim the post atomically in D1 before calling LinkedIn, so a double click, a retry or an overlapping cron run cannot post it twice.
+- **Headers:** a Content Security Policy that allows scripts only from the app itself (no inline script), plus HSTS, `X-Frame-Options: DENY`, `nosniff`, `no-referrer` and a restrictive `Permissions-Policy`. Inline styles are allowed because the dashboard sets element styles.
+- **No HTML injection:** post text is rendered with `textContent`, and every SQL query uses bound parameters.
+- **Supply chain:** no runtime dependencies. CI uses a read-only token, pins GitHub Actions to commit SHAs and fails on any high-severity `npm audit` finding. Dependabot opens weekly updates.
 - **Secrets:** none are in this repository. Local values go in `.dev.vars`, which git ignores. See [SECURITY.md](SECURITY.md) to report a problem.
 
 ## Run it
@@ -78,7 +85,7 @@ To deploy:
 ```sh
 npx wrangler d1 create linkedin-scheduler   # paste the id into wrangler.jsonc
 npx wrangler d1 migrations apply linkedin-scheduler --remote
-npx wrangler secret put DASH_PASSWORD
+npx wrangler secret put DASH_PASSWORD       # openssl rand -base64 24
 npx wrangler secret put TOKEN_ENC_KEY       # openssl rand -base64 32
 npx wrangler secret put LI_CLIENT_SECRET
 npm run deploy
@@ -96,27 +103,37 @@ The tests run inside the Workers runtime through [`@cloudflare/vitest-plugin`](h
 
 - slot math across both daylight saving changes, and cadence;
 - publishing: one post per slot under overlapping runs, the placeholder guard, the minimum gap, and failures;
-- token encryption: round trip, a fresh IV each time, rejecting tampered ciphertext, and upgrading a legacy plaintext token;
-- the HTTP surface: auth, security headers, input checks, and that a token is never returned.
+- token encryption: round trip, a fresh IV each time, rejecting tampered ciphertext and short keys;
+- sign-in: session cookies, expired or tampered sessions, cross-origin writes, and the rate limit;
+- OAuth: forged callbacks, a state from another browser, and query text that must not be shown;
+- the HTTP surface: security headers, the script-only CSP, bad JSON, input checks, and that a token is never returned;
+- "Post now" clicked twice at once publishes once.
 
 CI runs the same command on every push.
 
 ## API
 
-Every route needs `Authorization: Bearer <DASH_PASSWORD>`.
+Sign in with `POST /api/login {password}` (cookie) or send `Authorization: Bearer <DASH_PASSWORD>` on every call.
 
-| Method | Path | Body |
+| Method | Path | Body or query |
 | --- | --- | --- |
+| POST | `/api/login`, `/api/logout` | `{password}` / none |
 | GET | `/api/state` | |
-| POST | `/api/posts` | `{text, approve?, queue?, media?, first_comment?}` |
-| PUT | `/api/posts/:id` | `{text?, status?, queue?, media?}` |
+| POST | `/api/posts` | `{text, approve?, queue?, stage?, media?, first_comment?}` |
+| PUT | `/api/posts/:id` | `{text?, status?, queue?, stage?, media?, first_comment?}` |
 | DELETE | `/api/posts/:id` | |
 | POST | `/api/posts/:id/publish` | `{force?}` publishes now, outside the schedule |
 | POST | `/api/posts/:id/move` | `{dir: "up" \| "down"}` |
-| POST | `/api/settings` | `{queue?, post_day?, post_hour?, cadence_weeks?, min_gap_hours?}` |
-| POST | `/api/media?kind=images\|document\|video` | the file bytes |
-| POST | `/api/analytics/import` | the parsed export |
-| POST | `/api/oauth/start` | |
+| POST | `/api/posts/:id/comment` | `{text?}` retries the first comment on a live post |
+| POST | `/api/settings` | `{queue?, post_day?, post_hour?, cadence_weeks?, min_gap_hours?, stage_target?}` |
+| POST | `/api/media` | `?kind=images\|document\|video&name=`, the file bytes |
+| GET | `/api/media/video` | `?urn=` LinkedIn's processing status and preview for a video |
+| GET | `/api/analytics` | |
+| POST | `/api/analytics/import` | the export, parsed in the browser |
+| POST | `/api/analytics/page-stats` | `{checked_on, items}` numbers from each post's analytics page |
+| POST | `/api/analytics/lifetime` | `{checked_on, items}` lifetime impressions per post |
+| POST | `/api/oauth/start` | returns the LinkedIn sign-in URL |
+| POST | `/api/token`, `/api/token/test` | `{token}` / none, for a token made by hand |
 
 Because drafts can be added over HTTP, any script or workflow tool can feed the queue.
 
@@ -126,7 +143,7 @@ Because drafts can be added over HTTP, any script or workflow tool can feed the 
 - It posts as a person, not as a company page. Company pages need LinkedIn's Community Management API.
 - Video is limited to about 95 MB by the Worker request size on the free plan. LinkedIn itself allows more.
 - The slot time zone is a constant in `src/config.ts`.
-- The dashboard is one large HTML file. It works well for one user, but a component framework would be the next step for more screens.
+- The dashboard is one large script. It works well for one user, but a component framework would be the next step for more screens.
 
 ## License
 

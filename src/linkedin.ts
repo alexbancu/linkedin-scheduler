@@ -105,6 +105,23 @@ export function licdnUrl(u: string | undefined): string | null {
   }
 }
 
+/**
+ * Upload URLs come back from LinkedIn and the request to them carries the access
+ * token, so only https URLs on a linkedin.com host are accepted.
+ */
+export function linkedInUploadUrl(u: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(u);
+  } catch {
+    throw new Error('LinkedIn returned an invalid upload URL');
+  }
+  if (parsed.protocol !== 'https:' || !(parsed.hostname === 'linkedin.com' || parsed.hostname.endsWith('.linkedin.com'))) {
+    throw new Error('Refusing to send the token to an upload host outside linkedin.com: ' + parsed.hostname);
+  }
+  return u;
+}
+
 /** Image or document: one initializeUpload, then a single streamed PUT of the bytes. */
 export async function liUploadSinglePart(
   kind: 'images' | 'document',
@@ -125,7 +142,7 @@ export async function liUploadSinglePart(
   const uploadUrl = j.value.uploadUrl;
   const urn = (kind === 'images' ? j.value.image : j.value.document) as string;
 
-  const put = await fetch(uploadUrl, {
+  const put = await fetch(linkedInUploadUrl(uploadUrl), {
     method: 'PUT',
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': contentType, 'Content-Length': String(size) },
     body,
@@ -179,7 +196,7 @@ export async function liUploadVideo(token: string, owner: string, body: Readable
   for (const part of uploadInstructions) {
     const partLen = part.lastByte - part.firstByte + 1;
     const chunk = await chunker.read(partLen);
-    const put = await fetch(part.uploadUrl, {
+    const put = await fetch(linkedInUploadUrl(part.uploadUrl), {
       method: 'PUT',
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/octet-stream', 'Content-Length': String(chunk.length) },
       body: chunk,

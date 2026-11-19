@@ -2,6 +2,7 @@ import { ISO_DATE, buildAnalytics, importAnalytics, savePageStats, type Analytic
 import { MAX_COMMENT_CHARS, MAX_POST_CHARS, MAX_THUMB_CHARS, MEDIA_LIMITS, QUEUES, STAGES, isQueue, isStage, qKey, queueSettings, type QueueKey, type Stage } from './config';
 import { encryptToken, getLinkedInToken } from './crypto';
 import { json } from './http';
+import { oauthStateCookie } from './oauth';
 import { handleMediaUpload, handleVideoInfo, publishToLinkedIn } from './linkedin';
 import { getPost, markPosted, moveInQueue, postFirstComment } from './posts';
 import { scheduleSlots, slotLabel } from './schedule';
@@ -13,7 +14,6 @@ export async function handleApi(request: Request, url: URL, env: Env): Promise<R
   const method = request.method;
 
   if (method === 'GET' && pathname === '/api/state') return json(await buildState(env));
-
 
   // Attach media: stream the incoming file straight to LinkedIn, return asset URN
   if (method === 'POST' && pathname === '/api/media') return handleMediaUpload(request, url, env);
@@ -48,9 +48,18 @@ export async function handleApi(request: Request, url: URL, env: Env): Promise<R
     if (method === 'POST' && action === 'publish') {
       const body = await request.json<{ force?: boolean }>().catch(() => ({ force: false }));
       const post = await getPost(env, id);
-      if (post.status === 'posted') return json({ error: 'Already posted' }, 400);
-      if (post.status === 'publishing') return json({ error: 'This post is being published right now' }, 400);
-      const postUrl = await publishToLinkedIn(env, post, body.force === true);
+      // Claim the post atomically first, so a double click, a retry or a cron run
+      // at the same moment cannot publish it twice.
+      const claim = await env.DB.prepare("UPDATE posts SET status = 'publishing' WHERE id = ? AND status NOT IN ('posted', 'publishing')").bind(id).run();
+      if (!claim.meta.changes) return json({ error: 'This post is already posted or being published' }, 409);
+      let postUrl: string;
+      try {
+        postUrl = await publishToLinkedIn(env, post, body.force === true);
+      } catch (e) {
+        const msg = String(e instanceof Error ? e.message : e).slice(0, 500);
+        await env.DB.prepare("UPDATE posts SET status = 'failed', last_error = ? WHERE id = ?").bind(msg, id).run();
+        return json({ error: msg }, 502);
+      }
       await markPosted(env, id, postUrl);
       return json(await buildState(env));
     }
@@ -76,12 +85,12 @@ export async function handleApi(request: Request, url: URL, env: Env): Promise<R
       const body = await request.json<{ text?: string; status?: string; media?: MediaSpec | null; queue?: string; stage?: string | null; first_comment?: string | null }>();
       const post = await getPost(env, id);
       if (post.status === 'posted') return json({ error: 'Posted posts are read-only' }, 400);
+      if (post.status === 'publishing') return json({ error: 'This post is being published right now' }, 400);
       if (body.first_comment !== undefined) {
         const fc = (body.first_comment ?? '').trim() || null;
         if (fc && fc.length > MAX_COMMENT_CHARS) return json({ error: 'First comment exceeds ' + MAX_COMMENT_CHARS + ' characters' }, 400);
         await env.DB.prepare('UPDATE posts SET first_comment = ? WHERE id = ?').bind(fc, id).run();
       }
-      if (post.status === 'publishing') return json({ error: 'This post is being published right now' }, 400);
       if (body.stage !== undefined) {
         if (body.stage !== null && !isStage(body.stage)) return json({ error: 'Stage must be tofu, mofu, bofu or empty' }, 400);
         await env.DB.prepare('UPDATE posts SET stage = ? WHERE id = ?').bind(body.stage, id).run();
@@ -187,7 +196,7 @@ export async function handleApi(request: Request, url: URL, env: Env): Promise<R
     auth.searchParams.set('redirect_uri', url.origin + '/oauth/callback');
     auth.searchParams.set('scope', 'openid profile w_member_social');
     auth.searchParams.set('state', state);
-    return json({ url: auth.toString() });
+    return json({ url: auth.toString() }, 200, { 'Set-Cookie': oauthStateCookie(state) });
   }
 
   if (method === 'POST' && pathname === '/api/token') {
